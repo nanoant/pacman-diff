@@ -1,0 +1,58 @@
+#!/bin/bash
+# Copyright (c) 2017 Adam Strzelecki
+# Released under MIT license.
+# See LICENSE for details.
+unpack=0
+
+usage() {
+	bn=$(basename $0)
+	cat <<EOF
+usage: $bn [-h|--help|-u|--unpack] [<file> ...]
+
+  When run without arguments it shows all package file modifications.
+  When run with file arguments it shows a diff comparing the files to original version.
+
+options:
+  -h | --help    Shows this help and quits.
+  -u | --unpack  Unpack (restore) given files instead showing diff.
+EOF
+}
+
+while [ $# -gt 0 ]; do
+	case $1 in
+	-u|--unpack) unpack=1 ;;
+	-h|--help)   usage && exit 0  ;;
+	-*)          echo >&2 unknown option $1 && exit 1 ;;
+	 *)          break ;;
+	esac
+	shift
+done
+
+if [ $# -lt 1 ]; then
+	pacman -Qkk | grep -v 0\ altered
+	exit 0
+fi
+
+[ -z "$diffcmd" -a -n "$(type -p git)"       ] && diffcmd="git diff --no-index --";
+[ -z "$diffcmd" -a -n "$(type -p colordiff)" ] && diffcmd="colordiff -u";
+[ -z "$diffcmd"                              ] && diffcmd="diff -u"
+
+for fn; do
+	fn=$(readlink -f $fn)
+	if [ -z "$fn" ]; then
+		echo >&2 cannot resolve $1 && exit 1
+	fi
+	pkg=$(pacman -Qqo "$fn")
+	pkgver=$(pacman -Q $pkg)
+
+	if [ -z "$pkg" ]; then
+		echo >&2 no package owns $fn && exit 1
+	fi
+
+	if [ $unpack -eq 0 ]; then
+		tar -xOf /var/cache/pacman/pkg/${pkgver/ /-}-*.pkg.tar.xz ${fn#/} | \
+		$diffcmd - $fn
+	else
+		tar -C / -xovf /var/cache/pacman/pkg/${pkgver/ /-}-*.pkg.tar.xz ${fn#/}
+	fi
+done
